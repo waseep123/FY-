@@ -1,18 +1,54 @@
+# Compiled class file
+*.class
+
+# Log files
+*.log
+
+# BlueJ files
+*.ctxt
+
+# Mobile Tools for Java (J2ME)
+.mtj.tmp/
+
+# Package Files #
+*.jar
+*.war
+*.nar
+*.ear
+*.zip
+*.tar.gz
+*.rar
+
+# Maven
+target/
+pom.xml.tag
+pom.xml.releaseBackup
+pom.xml.versionsBackup
+pom.xml.next
+release.properties
+dependency-reduced-pom.xml
+buildNumber.properties
+.mvn/timing.properties
+
+# virtual machine crash logs
+hs_err_pid*
+
+# IDE Files
 .idea/
+*.iml
+.vscode/
+*.swp
+*.swo
+.project
+.classpath
+.settings/
+
+# P4 build artifacts
+p4src/build/
+*.json
+!mininet/*.json
+
+# Temporary files
 tmp/
-p4src/build
-app/target
-app/src/main/resources/p4info.txt
-app/src/main/resources/bmv2.json
-ptf/stratum_bmv2.log
-ptf/p4rt_write.log
-ptf/ptf.log
-ptf/ptf.pcap
-**/*.iml
-**/*.pyc
-**/*.bak
-**/.classpath
-**/.project
-**/.settings
-**/.factorypath
-util/.pipe_cfg
+*~
+.DS_Store

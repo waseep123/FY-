@@ -19,7 +19,7 @@ import argparse
 from mininet.cli import CLI
 from mininet.log import setLogLevel
 from mininet.net import Mininet
-from mininet.node import Host
+from mininet.node import Host, RemoteController
 from mininet.topo import Topo
 from stratum import StratumBmv2Switch
 
@@ -115,40 +115,40 @@ class TutorialTopo(Topo):
         self.addLink(spine2, leaf2)
 
         # IPv4 hosts attached to leaf 1
-        h1a = self.addHost('h1a', cls=IPv4Host, mac="00:00:00:00:00:1A",
+        h1 = self.addHost('h1', cls=IPv4Host, mac="00:00:00:00:00:1A",
                            ip='172.16.1.1/24', gw='172.16.1.254')
-        h1b = self.addHost('h1b', cls=IPv4Host, mac="00:00:00:00:00:1B",
+        h2 = self.addHost('h2', cls=IPv4Host, mac="00:00:00:00:00:1B",
                            ip='172.16.1.2/24', gw='172.16.1.254')
-        h1c = self.addHost('h1c', cls=TaggedIPv4Host, mac="00:00:00:00:00:1C",
+        h3 = self.addHost('h3', cls=TaggedIPv4Host, mac="00:00:00:00:00:1C",
                            ip='172.16.1.3/24', gw='172.16.1.254', vlan=100)
-        h2 = self.addHost('h2', cls=TaggedIPv4Host, mac="00:00:00:00:00:20",
+        h4 = self.addHost('h4', cls=TaggedIPv4Host, mac="00:00:00:00:00:20",
                           ip='172.16.2.1/24', gw='172.16.2.254', vlan=200)
-        self.addLink(h1a, leaf1)  # port 3
-        self.addLink(h1b, leaf1)  # port 4
-        self.addLink(h1c, leaf1)  # port 5
-        self.addLink(h2, leaf1)  # port 6
+        self.addLink(h1, leaf1)  # port 3
+        self.addLink(h2, leaf1)  # port 4
+        self.addLink(h3, leaf1)  # port 5
+        self.addLink(h4, leaf1)  # port 6
 
         # IPv4 hosts attached to leaf 2
-        h3 = self.addHost('h3', cls=TaggedIPv4Host, mac="00:00:00:00:00:30",
+        h5 = self.addHost('h5', cls=TaggedIPv4Host, mac="00:00:00:00:00:30",
                           ip='172.16.3.1/24', gw='172.16.3.254', vlan=300)
-        h4 = self.addHost('h4', cls=IPv4Host, mac="00:00:00:00:00:40",
+        h6 = self.addHost('h6', cls=IPv4Host, mac="00:00:00:00:00:40",
                           ip='172.16.4.1/24', gw='172.16.4.254')
-        self.addLink(h3, leaf2)  # port 3
-        self.addLink(h4, leaf2)  # port 4
+        self.addLink(h5, leaf2)  # port 3
+        self.addLink(h6, leaf2)  # port 4
 
 
 def main():
-    net = Mininet(topo=TutorialTopo(), controller=None)
+    net = Mininet(topo=TutorialTopo(), controller=RemoteController('c0', ip='10.3.12.140'))
     net.start()
     CLI(net)
     net.stop()
-    print '#' * 80
-    print 'ATTENTION: Mininet was stopped! Perhaps accidentally?'
-    print 'No worries, it will restart automatically in a few seconds...'
-    print 'To access again the Mininet CLI, use `make mn-cli`'
-    print 'To detach from the CLI (without stopping), press Ctrl-D'
-    print 'To permanently quit Mininet, use `make stop`'
-    print '#' * 80
+    print('#' * 80)
+    print('ATTENTION: Mininet was stopped! Perhaps accidentally?')
+    print('No worries, it will restart automatically in a few seconds...')
+    print('To access again the Mininet CLI, use `make mn-cli`')
+    print('To detach from the CLI (without stopping), press Ctrl-D')
+    print('To permanently quit Mininet, use `make stop`')
+    print('#' * 80)
 
 
 if __name__ == "__main__":
@@ -158,3 +158,4 @@ if __name__ == "__main__":
     setLogLevel('info')
 
     main()
+

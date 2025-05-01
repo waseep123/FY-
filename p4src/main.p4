@@ -45,6 +45,7 @@ typedef bit<16>  l4_port_t;
 
 const bit<16> ETHERTYPE_IPV4 = 0x0800;
 const bit<16> ETHERTYPE_IPV6 = 0x86dd;
+const bit<16> ETHERTYPE_ARP = 0x0806;
 
 const bit<8> IP_PROTO_ICMP   = 1;
 const bit<8> IP_PROTO_TCP    = 6;
@@ -56,6 +57,12 @@ const mac_addr_t IPV6_MCAST_01 = 0x33_33_00_00_00_01;
 
 const bit<8> ICMP6_TYPE_NS = 135;
 const bit<8> ICMP6_TYPE_NA = 136;
+
+const bit<8> ICMP_ECHO_REQUEST = 8;
+const bit<8> ICMP_ECHO_REPLY = 0;
+
+const bit<16> ARP_REQUEST = 1;
+const bit<16> ARP_REPLY = 2;
 
 const bit<8> NDP_OPT_TARGET_LL_ADDR = 2;
 
@@ -160,6 +167,18 @@ header ndp_t {
     bit<48>      target_mac_addr;
 }
 
+header arp_t {
+    bit<16> hw_type;
+    bit<16> proto_type;
+    bit<8>  hw_addr_len;
+    bit<8>  proto_addr_len;
+    bit<16> opcode;
+    mac_addr_t sender_hw_addr;
+    bit<32> sender_proto_addr;
+    mac_addr_t target_hw_addr;
+    bit<32> target_proto_addr;
+}
+
 // Packet-in header. Prepended to packets sent to the CPU_PORT and used by the
 // P4Runtime server (Stratum) to populate the PacketIn message metadata fields.
 // Here we use it to carry the original ingress port where the packet was
@@ -193,6 +212,7 @@ struct parsed_headers_t {
     icmp_t icmp;
     icmpv6_t icmpv6;
     ndp_t ndp;
+    arp_t arp;
 }
 
 struct local_metadata_t {
@@ -202,6 +222,7 @@ struct local_metadata_t {
     ipv6_addr_t next_srv6_sid;
     bit<8>      ip_proto;
     bit<8>      icmp_type;
+    bit<16>     arp_opcode;
 }
 
 
@@ -231,6 +252,7 @@ parser ParserImpl (packet_in packet,
         transition select(hdr.ethernet.ether_type){
             ETHERTYPE_IPV4: parse_ipv4;
             ETHERTYPE_IPV6: parse_ipv6;
+            ETHERTYPE_ARP: parse_arp;
             default: accept;
         }
     }
@@ -330,6 +352,12 @@ parser ParserImpl (packet_in packet,
             default: accept;
         }
     }
+
+    state parse_arp {
+        packet.extract(hdr.arp);
+        local_metadata.arp_opcode = hdr.arp.opcode;
+        transition accept;
+    }
 }
 
 
@@ -423,6 +451,27 @@ control IngressPipeImpl (inout parsed_headers_t    hdr,
         counters = direct_counter(CounterType.packets_and_bytes);
     }
 
+    // IPv4 routing table - for basic IPv4 forwarding
+    action ipv4_forward(mac_addr_t dst_mac, mac_addr_t src_mac, port_num_t port) {
+        standard_metadata.egress_spec = port;
+        hdr.ethernet.dst_addr = dst_mac;
+        hdr.ethernet.src_addr = src_mac;
+        hdr.ipv4.ttl = hdr.ipv4.ttl - 1;
+    }
+
+    table ipv4_routing_table {
+        key = {
+            hdr.ipv4.dst_addr: lpm;
+        }
+        actions = {
+            ipv4_forward;
+            drop;
+        }
+        default_action = drop();
+        @name("ipv4_routing_table_counter")
+        counters = direct_counter(CounterType.packets_and_bytes);
+    }
+
 
     // *** TODO EXERCISE 5 (IPV6 ROUTING)
     //
@@ -474,6 +523,11 @@ control IngressPipeImpl (inout parsed_headers_t    hdr,
         clone3(CloneType.I2E, CPU_CLONE_SESSION_ID, { standard_metadata.ingress_port });
     }
 
+    // Allow IPv4 ARP broadcast traffic
+    action permit() {
+        // No special action, just permit the packet to continue through the pipeline
+    }
+
     table acl_table {
         key = {
             standard_metadata.ingress_port: ternary;
@@ -484,10 +538,13 @@ control IngressPipeImpl (inout parsed_headers_t    hdr,
             local_metadata.icmp_type:       ternary;
             local_metadata.l4_src_port:     ternary;
             local_metadata.l4_dst_port:     ternary;
+            hdr.arp.isValid():              ternary;
+            local_metadata.arp_opcode:      ternary;
         }
         actions = {
             send_to_cpu;
             clone_to_cpu;
+            permit;
             drop;
         }
         @name("acl_table_counter")
@@ -497,15 +554,25 @@ control IngressPipeImpl (inout parsed_headers_t    hdr,
     apply {
 
         if (hdr.cpu_out.isValid()) {
-            // *** TODO EXERCISE 4
-            // Implement logic such that if this is a packet-out from the
-            // controller:
-            // 1. Set the packet egress port to that found in the cpu_out header
-            // 2. Remove (set invalid) the cpu_out header
-            // 3. Exit the pipeline here (no need to go through other tables
+            // Implement packet-out logic
+            standard_metadata.egress_spec = hdr.cpu_out.egress_port;
+            hdr.cpu_out.setInvalid();
+            exit;
         }
 
         bool do_l3_l2 = true;
+
+        // Handle ARP requests by redirecting to the controller
+        if (hdr.arp.isValid() && hdr.arp.opcode == ARP_REQUEST) {
+            // Send ARP requests to the controller for processing
+            clone_to_cpu();
+        }
+
+        // Handle ICMP Echo requests (ping) by redirecting to the controller
+        if (hdr.icmp.isValid() && hdr.icmp.type == ICMP_ECHO_REQUEST) {
+            // Send ICMP echo requests to the controller for processing
+            clone_to_cpu();
+        }
 
         if (hdr.icmpv6.isValid() && hdr.icmpv6.type == ICMP6_TYPE_NS) {
             // *** TODO EXERCISE 5
@@ -517,23 +584,23 @@ control IngressPipeImpl (inout parsed_headers_t    hdr,
         }
 
         if (do_l3_l2) {
-
-            // *** TODO EXERCISE 5
-            // Insert logic to match the My Station table and upon hit, the
-            // routing table. You should also add a conditional to drop the
-            // packet if the hop_limit reaches 0.
-
-            // *** TODO EXERCISE 6
-            // Insert logic to match the SRv6 My SID and Transit tables as well
-            // as logic to perform PSP behavior. HINT: This logic belongs
-            // somewhere between checking the switch's my station table and
-            // applying the routing table.
-
-            // L2 bridging logic. Apply the exact table first...
-            if (!l2_exact_table.apply().hit) {
-                // ...if an entry is NOT found, apply the ternary one in case
-                // this is a multicast/broadcast NDP NS packet.
-                l2_ternary_table.apply();
+            // For IPv4 packets, ensure we have basic routing capabilities
+            if (hdr.ipv4.isValid()) {
+                // Drop packet if TTL is 0
+                if (hdr.ipv4.ttl == 0) {
+                    drop();
+                    return;
+                }
+                
+                // Apply IPv4 routing
+                ipv4_routing_table.apply();
+            } else {
+                // L2 bridging logic. Apply the exact table first...
+                if (!l2_exact_table.apply().hit) {
+                    // ...if an entry is NOT found, apply the ternary one in case
+                    // this is a multicast/broadcast NDP NS packet.
+                    l2_ternary_table.apply();
+                }
             }
         }
 
@@ -549,13 +616,9 @@ control EgressPipeImpl (inout parsed_headers_t hdr,
     apply {
 
         if (standard_metadata.egress_port == CPU_PORT) {
-            // *** TODO EXERCISE 4
-            // Implement logic such that if the packet is to be forwarded to the
-            // CPU port, e.g., if in ingress we matched on the ACL table with
-            // action send/clone_to_cpu...
-            // 1. Set cpu_in header as valid
-            // 2. Set the cpu_in.ingress_port field to the original packet's
-            //    ingress port (standard_metadata.ingress_port).
+            // Implement packet-in logic
+            hdr.cpu_in.setValid();
+            hdr.cpu_in.ingress_port = standard_metadata.ingress_port;
         }
 
         // If this is a multicast packet (flag set by l2_ternary_table), make
@@ -612,6 +675,7 @@ control DeparserImpl(packet_out packet, in parsed_headers_t hdr) {
         packet.emit(hdr.icmp);
         packet.emit(hdr.icmpv6);
         packet.emit(hdr.ndp);
+        packet.emit(hdr.arp);
     }
 }
 
